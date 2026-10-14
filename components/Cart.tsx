@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useContext, useMemo, useState, useRef, ReactNode } from "react";
-import { ShoppingBag, Minus, Plus, X, ChevronRight, Check, LocateFixed, Loader2 } from "lucide-react";
+import { ShoppingBag, Minus, Plus, X, ChevronRight, Check, LocateFixed, Loader2, Gift } from "lucide-react";
 import { WHATSAPP } from "@/lib/config";
 import { TIERS, feeFor, kmFrom } from "@/lib/delivery";
 import type { Item } from "@/lib/menu";
@@ -45,10 +45,15 @@ function Sheet({ onClose }: { onClose: () => void }) {
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
   const [km, setKm] = useState<number | null>(null);
   const [loc, setLoc] = useState<"idle" | "busy" | "denied">("idle");
+  const [orderForOther, setOrderForOther] = useState(false);
+  const [recipientName, setRecipientName] = useState("");
+  const [recipientPhone, setRecipientPhone] = useState("");
+
   const delivery = mode === "Delivery";
   const fee = delivery && km !== null ? feeFor(km) : 0;
   const far = delivery && km !== null && fee === null;
   const grand = total + (fee ?? 0);
+
   const locate = () => {
     if (!navigator.geolocation) return setLoc("denied");
     setLoc("busy");
@@ -56,14 +61,46 @@ function Sheet({ onClose }: { onClose: () => void }) {
       (p) => { const c = { lat: p.coords.latitude, lng: p.coords.longitude }; setPos(c); setKm(kmFrom(c.lat, c.lng)); setLoc("idle"); },
       () => setLoc("denied"), { enableHighAccuracy: true, timeout: 12000 });
   };
-  const pick = (o: string) => { setMode(o); if (o === "Delivery" && !pos && loc !== "busy") locate(); };
-  const problem = delivery ? (km === null ? "Share your location or pick your distance" : far ? "Sorry, we deliver up to 10 km only" : !addr.trim() ? "Add your address or landmark" : "") : "";
+
+  const pick = (o: string) => {
+    setMode(o);
+    if (o === "Delivery" && !orderForOther && !pos && loc !== "busy") locate();
+  };
+
+  const problem = delivery
+    ? orderForOther
+      ? !addr.trim()
+        ? "Add the recipient's delivery address"
+        : !recipientName.trim() && !recipientPhone.trim()
+        ? "Add recipient name or phone number"
+        : km === null
+        ? "Pick approximate delivery distance"
+        : far
+        ? "Sorry, we deliver up to 10 km only"
+        : ""
+      : km === null
+      ? "Share your location or pick your distance"
+      : far
+      ? "Sorry, we deliver up to 10 km only"
+      : !addr.trim()
+      ? "Add your address or landmark"
+      : ""
+    : "";
+
   const send = () => {
     const body = lines.map((l) => `• ${l.qty} x ${l.name} - ₹${l.qty * l.price}`).join("\n");
-    const d = delivery ? `\nDelivery fee (~${km!.toFixed(1)} km): ₹${fee}\nAddress: ${addr}${pos ? `\nLocation: https://www.google.com/maps?q=${pos.lat},${pos.lng}` : ""}` : "";
-    const msg = `*New Order - 7 GRILL*\n\n${body}\n\nItems: ₹${total}${d}\n*Total: ₹${grand}*\nType: ${mode}${name ? `\nName: ${name}` : ""}${note ? `\nNote: ${note}` : ""}`;
+    let d = "";
+    if (delivery) {
+      if (orderForOther) {
+        d = `\n\n*Delivery Details (For Someone Else)*\nRecipient: ${recipientName || "Friend/Family"}${recipientPhone ? ` (${recipientPhone})` : ""}\nDelivery Address: ${addr}\nDelivery Fee (~${km ? km.toFixed(1) : "2.5"} km): ₹${fee}`;
+      } else {
+        d = `\n\n*Delivery Details*\nAddress: ${addr}\nDelivery Fee (~${km!.toFixed(1)} km): ₹${fee}${pos ? `\nLocation Pin: https://www.google.com/maps?q=${pos.lat},${pos.lng}` : ""}`;
+      }
+    }
+    const msg = `*New Order - 7 GRILL*\n\n${body}\n\nItems: ₹${total}${d}\n*Total: ₹${grand}*\nOrder Type: ${delivery ? (orderForOther ? "Delivery (For Someone Else)" : "Delivery (Direct)") : mode}${name ? `\nSender/Your Name: ${name}` : ""}${note ? `\nNote: ${note}` : ""}`;
     window.open(`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(msg)}`, "_blank");
   };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/70" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full md:max-w-md max-h-[92dvh] overflow-y-auto rounded-t-3xl md:rounded-3xl bg-card border border-line p-5 pb-8">
@@ -84,29 +121,136 @@ function Sheet({ onClose }: { onClose: () => void }) {
             </ul>
             <div className="mt-4 grid grid-cols-3 gap-2">
               {["Dine-in", "Takeaway", "Delivery"].map((o) => (
-                <button key={o} onClick={() => pick(o)} className={`rounded-xl py-2.5 text-sm font-semibold border ${mode === o ? "bg-ye text-ink border-ye" : "border-line text-cream/80"}`}>{o}</button>
+                <button key={o} onClick={() => pick(o)} className={`rounded-xl py-2.5 text-sm font-semibold border ${mode === o ? "bg-ye text-ink border-ye font-bold" : "border-line text-cream/80"}`}>{o}</button>
               ))}
             </div>
+
             {delivery && (
               <div className="mt-3 rounded-2xl border border-line bg-ink p-3 space-y-3">
-                <button onClick={locate} className="w-full flex items-center justify-center gap-2 rounded-xl border border-ye/60 text-ye py-2.5 font-semibold">
-                  {loc === "busy" ? <Loader2 size={18} className="animate-spin" /> : <LocateFixed size={18} />}{pos ? "Location found. Update" : "Use my current location"}
-                </button>
-                {loc === "denied" && <p className="text-sm text-cream/70">Location is off. Pick your approximate distance instead:</p>}
-                {(loc === "denied" || (km !== null && !pos)) && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {TIERS.map((t) => <button key={t.label} onClick={() => { setPos(null); setKm(t.max - 0.5); }} className={`rounded-lg py-2 text-sm border ${km !== null && !pos && feeFor(km) === t.fee ? "bg-ye text-ink border-ye" : "border-line"}`}>{t.label} · ₹{t.fee}</button>)}
-                  </div>
+                {/* Deliver to me VS For someone else Toggle */}
+                <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-card border border-line">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrderForOther(false);
+                      if (!pos && loc !== "busy") locate();
+                    }}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      !orderForOther ? "bg-ye text-ink font-bold shadow-sm" : "text-cream/70 hover:text-cream"
+                    }`}
+                  >
+                    <LocateFixed size={14} />
+                    Deliver to Me
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrderForOther(true);
+                      setPos(null);
+                      if (km === null) setKm(2.5);
+                    }}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      orderForOther ? "bg-ye text-ink font-bold shadow-sm" : "text-cream/70 hover:text-cream"
+                    }`}
+                  >
+                    <Gift size={14} />
+                    For Someone Else
+                  </button>
+                </div>
+
+                {!orderForOther ? (
+                  <>
+                    <button onClick={locate} className="w-full flex items-center justify-center gap-2 rounded-xl border border-ye/60 text-ye py-2.5 font-semibold hover:bg-ye/10 transition-colors">
+                      {loc === "busy" ? <Loader2 size={18} className="animate-spin" /> : <LocateFixed size={18} />}
+                      {pos ? "Location found. Update" : "Use my current location"}
+                    </button>
+                    {loc === "denied" && <p className="text-xs text-cream/70">Location permission is off. Pick your approximate distance instead:</p>}
+                    {(loc === "denied" || (km !== null && !pos)) && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {TIERS.map((t) => (
+                          <button
+                            key={t.label}
+                            onClick={() => { setPos(null); setKm(t.max - 0.5); }}
+                            className={`rounded-lg py-2 text-xs border ${km !== null && !pos && feeFor(km) === t.fee ? "bg-ye text-ink border-ye font-bold" : "border-line text-cream/80"}`}
+                          >
+                            {t.label} · ₹{t.fee}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {km !== null && (
+                      <p className={`text-xs font-semibold ${far ? "text-red-400" : "text-leaf"}`}>
+                        {far ? `About ${km.toFixed(1)} km away. Outside our 10 km delivery range.` : `About ${km.toFixed(1)} km away. Delivery fee: ₹${fee}`}
+                      </p>
+                    )}
+                    <textarea
+                      value={addr}
+                      onChange={(e) => setAddr(e.target.value)}
+                      rows={2}
+                      placeholder="Your house/flat no., street, landmark in Dehradun"
+                      className="w-full rounded-xl bg-card border border-line px-3 py-2.5 outline-none focus:border-ye text-sm"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-cream/70 flex items-center gap-1.5 bg-card/60 p-2.5 rounded-xl border border-line">
+                      <span>🎁</span>
+                      <span>Ordering for someone else? Enter their details so our delivery rider can reach them easily.</span>
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        value={recipientName}
+                        onChange={(e) => setRecipientName(e.target.value)}
+                        placeholder="Recipient's name"
+                        className="w-full rounded-xl bg-card border border-line px-3 py-2 text-sm outline-none focus:border-ye"
+                      />
+                      <input
+                        value={recipientPhone}
+                        onChange={(e) => setRecipientPhone(e.target.value)}
+                        placeholder="Recipient's phone"
+                        type="tel"
+                        className="w-full rounded-xl bg-card border border-line px-3 py-2 text-sm outline-none focus:border-ye"
+                      />
+                    </div>
+                    <textarea
+                      value={addr}
+                      onChange={(e) => setAddr(e.target.value)}
+                      rows={2}
+                      placeholder="Recipient's complete address, street & landmark in Dehradun"
+                      className="w-full rounded-xl bg-card border border-line px-3 py-2.5 outline-none focus:border-ye text-sm"
+                    />
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-xs text-cream/70">
+                        <span>Approx. distance from 7 GRILL (Kanwali Rd):</span>
+                        {fee !== null && <span className="text-leaf font-bold">₹{fee}</span>}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {TIERS.map((t) => (
+                          <button
+                            key={t.label}
+                            type="button"
+                            onClick={() => { setPos(null); setKm(t.max - 0.5); }}
+                            className={`rounded-lg py-2 text-xs font-semibold border transition-colors ${
+                              km !== null && feeFor(km) === t.fee
+                                ? "bg-ye text-ink border-ye font-bold"
+                                : "border-line text-cream/80 hover:border-ye/40"
+                            }`}
+                          >
+                            {t.label} · ₹{t.fee}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
                 )}
-                {km !== null && <p className={`text-sm font-semibold ${far ? "text-red-400" : "text-leaf"}`}>{far ? `About ${km.toFixed(1)} km away. Outside our 10 km delivery range.` : `About ${km.toFixed(1)} km away. Delivery ₹${fee}`}</p>}
-                <textarea value={addr} onChange={(e) => setAddr(e.target.value)} rows={2} placeholder="House no., street, landmark" className="w-full rounded-xl bg-card border border-line px-3 py-2.5 outline-none focus:border-ye" />
               </div>
             )}
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name (optional)" className="mt-3 w-full rounded-xl bg-ink border border-line px-4 py-3 outline-none focus:border-ye" />
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note, e.g. less spicy (optional)" className="mt-2 w-full rounded-xl bg-ink border border-line px-4 py-3 outline-none focus:border-ye" />
+
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name / Sender name (optional)" className="mt-3 w-full rounded-xl bg-ink border border-line px-4 py-3 outline-none focus:border-ye text-sm" />
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note, e.g. less spicy, call before arriving (optional)" className="mt-2 w-full rounded-xl bg-ink border border-line px-4 py-3 outline-none focus:border-ye text-sm" />
             <div className="mt-5 space-y-1 text-cream/80">
               <div className="flex justify-between"><span>Items</span><span>₹{total}</span></div>
-              {delivery && <div className="flex justify-between"><span>Delivery (approx)</span><span>{fee === null ? "-" : `₹${fee}`}</span></div>}
+              {delivery && <div className="flex justify-between"><span>Delivery</span><span>{fee === null ? "-" : `₹${fee}`}</span></div>}
               <div className="flex justify-between text-xl font-black text-cream pt-1"><span>Total</span><span className="text-ye">₹{grand}</span></div>
             </div>
             <div className="mt-4"><Swipe onDone={send} disabled={!!problem} /></div>
